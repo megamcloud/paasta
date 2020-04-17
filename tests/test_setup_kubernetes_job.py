@@ -5,7 +5,8 @@ from kubernetes.client import V1Deployment
 from kubernetes.client import V1StatefulSet
 from pytest import raises
 
-from paasta_tools.kubernetes.application.controller_wrappers import Application
+from paasta_tools.kubernetes.application.controller_wrappers import DeploymentWrapper
+from paasta_tools.kubernetes.application.controller_wrappers import StatefulSetWrapper
 from paasta_tools.kubernetes_tools import InvalidKubernetesConfig
 from paasta_tools.kubernetes_tools import KubeDeployment
 from paasta_tools.setup_kubernetes_job import create_application_object
@@ -182,23 +183,30 @@ def test_setup_kube_deployment_create_update():
     fake_create = mock.MagicMock()
     fake_update = mock.MagicMock()
 
-    def simple_create_application_object(
-        kube_client, service, instance, cluster, soa_dir
-    ):
-        fake_app = mock.MagicMock(spec=Application)
-        fake_app.kube_deployment = KubeDeployment(
-            service=service, instance=instance, git_sha="1", config_sha="1", replicas=1
-        )
-        fake_app.create = fake_create
-        fake_app.update = fake_update
-        fake_app.item = None
-        fake_app.soa_config = None
-        return True, fake_app
+    def simple_create_application_object_wrapper(wrapper_class):
+        def simple_create_application_object(
+            kube_client, service, instance, cluster, soa_dir
+        ):
+            fake_app = mock.MagicMock(spec=wrapper_class)
+            fake_app.kube_deployment = KubeDeployment(
+                service=service,
+                instance=instance,
+                git_sha="1",
+                config_sha="1",
+                replicas=1,
+            )
+            fake_app.create = fake_create
+            fake_app.update = fake_update
+            fake_app.item = None
+            fake_app.soa_config = None
+            return True, fake_app
+
+        return simple_create_application_object
 
     with mock.patch(
         "paasta_tools.setup_kubernetes_job.create_application_object",
         autospec=True,
-        side_effect=simple_create_application_object,
+        side_effect=simple_create_application_object_wrapper(DeploymentWrapper),
     ) as mock_create_application_object, mock.patch(
         "paasta_tools.setup_kubernetes_job.list_all_deployments", autospec=True
     ) as mock_list_all_deployments, mock.patch(
@@ -374,3 +382,29 @@ def test_setup_kube_deployment_create_update():
             soa_dir="/nail/blah",
         )
         assert fake_update.call_count == 1
+
+        # no updating autoscaler config because app is stateful set.
+        mock_create_application_object.side_effect = simple_create_application_object_wrapper(
+            StatefulSetWrapper,
+        )
+        mock_autoscaling_is_paused.return_value = False
+        mock_is_deployment_marked_paused.return_value = True
+        fake_create.reset_mock()
+        fake_update.reset_mock()
+        mock_service_instances = ["kurupt.garage"]
+        mock_list_all_deployments.return_value = [
+            KubeDeployment(
+                service="kurupt",
+                instance="garage",
+                git_sha="1",
+                config_sha="1",
+                replicas=1,
+            )
+        ]
+        setup_kube_deployments(
+            kube_client=mock_client,
+            service_instances=mock_service_instances,
+            cluster="fake_cluster",
+            soa_dir="/nail/blah",
+        )
+        assert fake_update.call_count == 0
