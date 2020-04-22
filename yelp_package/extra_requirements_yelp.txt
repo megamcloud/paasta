@@ -8,7 +8,7 @@ inflection==0.3.1
 markdown==2.4
 monk==0.7.0
 python-jsonschema-objects==0.3.1
-scribereader==0.2.6
+scribereader==0.8.1
 signalform-tools==0.0.16
 slo-transcoder==3.2.3
 smmap2==2.0.3
